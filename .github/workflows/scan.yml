@@ -1,0 +1,110 @@
+name: Build & Scan Container Image
+
+on:
+  push:
+    branches:
+      - '*'
+
+jobs:
+  build:
+    name: Build docker image
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # The below steps configure the runtime environment
+      # to perform SBOM generation and vulnerability management
+      # scans with the Amazon Inspector integration.
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+
+      - name: Set up docker build prereqs (QEMU)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up docker build prereqs (Buildx)
+        uses: docker/setup-buildx-action@v3
+
+      # The below step builds the sample container to be scanned.
+      # The Dockerfile is the container definition that you created
+      # in the workshop
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: app:latest
+          load: true
+
+      # The below step will build the sample container to be scanned.
+      # The Dockerfile is the container definition that you created
+      # in the workshop
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::XXXXXXXXXXXX:role/workshop-github-action-iam-role # Replace this with the IAM role created for this module.
+
+      # The below step will scan the container image built in the previous step.
+      # The step will display the findings and save them in various supported formats
+      # as outputs that can be further shared with distributed teams if needed.
+      - name: Scan built image with Inspector
+        uses: aws-actions/vulnerability-scan-github-action-for-amazon-inspector@main
+        id: inspector
+        with:
+          artifact_type: 'container'
+          artifact_path: 'app:latest'
+          display_vulnerability_findings: "enabled"
+          output_sbom_path: 'sbom.json'
+          output_inspector_scan_path: 'inspector_scan.json'
+          output_inspector_scan_path_csv: 'inspector_pkg_scan.csv'
+          output_inspector_dockerfile_scan_path_csv: 'inspector_dockerfile_scan.csv'
+          output_inspector_dockerfile_scan_path_markdown: 'inspector_dockerfile_scan.md'
+          critical_threshold: 1 # set vulnerability_threshold_exceeded=1 if 1 or more critical vulnerabilities found
+          high_threshold: 5     # set vulnerability_threshold_exceeded=1 if 5 or more high vulnerabilities found
+          medium_threshold: 10  # set vulnerability_threshold_exceeded=1 if 10 or more medium vulnerabilities found
+          low_threshold: 10     # set vulnerability_threshold_exceeded=1 if 10 or more low vulnerabilities found
+          other_threshold: 15   # set vulnerability_threshold_exceeded=1 if 15 or more informational vulnerabilities found
+          sbomgen_version: "latest"
+
+      # These are standard output options that you can use with the Amazon Inspector integration
+      # with GitHub actions.
+      # For more details: https://amazon.awsapps.com/workdocs-preview/index.html#/document/0a3e165e14e7e0d87b31724e844a116bc8ace4bcd1d9d0a6cadd4fd742bfd6e9
+      - name: Demonstrate SBOM Output (JSON)
+        run: cat ${{ steps.inspector.outputs.artifact_sbom }}
+
+      - name: Demonstrate Inspector Scan Output (JSON)
+        run: cat ${{ steps.inspector.outputs.inspector_scan_results }}
+
+      - name: Demonstrate Inspector Scan Output (CSV)
+        run: cat ${{ steps.inspector.outputs.inspector_scan_results_csv }}
+
+      - name: Display Dockerfile vulns (CSV)
+        run: cat inspector_dockerfile_scan.csv
+
+      - name: Display Dockerfile vulns (MD)
+        run: cat inspector_dockerfile_scan.md
+
+      - name: Debug Dockerfile output variables
+        run: |
+          echo ${{ steps.inspector.outputs.inspector_dockerile_scan_results_csv }}
+          echo ${{ steps.inspector.outputs.inspector_dockerile_scan_results_markdown }}
+
+      - name: Demonstrate Upload Scan Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inspector Scan SBOM Results
+          path: |
+            ${{ steps.inspector.outputs.artifact_sbom }}
+            ${{ steps.inspector.outputs.inspector_scan_results }}
+            ${{ steps.inspector.outputs.inspector_scan_results_csv }}
+            ${{ steps.inspector.outputs.inspector_scan_results_markdown }}
+            ${{ steps.inspector.outputs.inspector_dockerile_scan_results_csv }}
+            ${{ steps.inspector.outputs.inspector_dockerile_scan_results_markdown }}
+
+        # This step will fail if vulnerability_threshold_exceeded is set to a value other than 0
+        # based on the thresholds configured in step titled **Scan built image with Inspector**
+      - name: On vulnerability threshold exceeded
+        run: exit ${{ steps.inspector.outputs.vulnerability_threshold_exceeded }}
