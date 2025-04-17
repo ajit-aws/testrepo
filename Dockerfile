@@ -1,4 +1,3 @@
-:::code{showCopyAction=true}
 FROM ubuntu:bionic-20180426
 ENV DEBIAN_FRONTEND="noninteractive"
 
@@ -16,4 +15,3 @@ RUN apt-get install -y curl && \
 
 #Installation of ftp server
     apt-get install -y proftpd
-:::
